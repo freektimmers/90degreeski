@@ -32,7 +32,7 @@ export class VignetteSystem extends BaseSystem {
     }
   }
 
-  private initializeVignette(): void {
+  private async initializeVignette(): Promise<void> {
     if (!this.app || !this.world) {
       console.log('[VignetteSystem] Waiting for app and world to be ready');
       return;
@@ -44,9 +44,12 @@ export class VignetteSystem extends BaseSystem {
     if (this.vignetteSprite && this.vignetteSprite.parent) {
       this.vignetteSprite.parent.removeChild(this.vignetteSprite);
     }
+
+    // Ensure assets are loaded
+    await Assets.load(['vignette3.png']);
     
     // Create vignette sprite
-    const texture = Assets.get('/vignette3.png');
+    const texture = Assets.get('vignette3.png');
     this.vignetteSprite = new Sprite(texture);
     
     // Center the sprite

@@ -73,7 +73,7 @@ export class CoinSystem extends BaseSystem {
       const transform = new TransformComponent(0, 0);
       const gridPos = new GridPositionComponent(0, 0);
       const visual = new VisualComponent({
-        spritePath: '/coin.png',
+        spritePath: 'coin.png',
       });
       const coinComponent = new CoinComponent();
       const zIndex = new ZIndexComponent(Z_INDEX.COIN);

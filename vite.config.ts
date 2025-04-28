@@ -22,14 +22,19 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     minify: 'terser',
+    emptyOutDir: true,
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['pixi.js', 'inversify', 'reflect-metadata'],
         },
+        assetFileNames: 'assets/[name]-[hash][extname]',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
       },
     },
   },
   publicDir: 'public',
   assetsInclude: ['**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.gif', '**/*.svg'],
+  base: '/90degreeski/',
 });

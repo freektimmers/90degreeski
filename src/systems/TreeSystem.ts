@@ -11,7 +11,7 @@ import { PlayerComponent, PlayerComponentType } from '../components/PlayerCompon
 import { GridService } from '../services/GridService';
 import { GridOccupancyService, OccupancyType } from '../services/GridOccupancyService';
 import { World, GameState } from '../core/World';
-import { Application } from 'pixi.js';
+import { Application, Assets } from 'pixi.js';
 import { MovementSystem } from '../systems/MovementSystem';
 
 // Z-index base values for different entity types
@@ -121,7 +121,7 @@ export class TreeSystem extends BaseSystem {
     }
   }
 
-  private initializeTreePool(): void {
+  private async initializeTreePool(): Promise<void> {
     if (!this.world || !this.app?.stage) return;
     
     // Get the movement system first
@@ -130,13 +130,16 @@ export class TreeSystem extends BaseSystem {
       console.warn('[TreeSystem] Movement system not ready, delaying pool initialization');
       return;
     }
+
+    // Ensure assets are loaded
+    await Assets.load(['tree.png']);
     
     for (let i = 0; i < this.POOL_SIZE; i++) {
       const tree = new BaseEntity();
       const transform = new TransformComponent(0, 0);
       const gridPos = new GridPositionComponent(0, 0);
       const visual = new VisualComponent({
-        spritePath: '/tree.png',
+        spritePath: 'tree.png',
       });
       const treeComponent = new TreeComponent();
       const zIndex = new ZIndexComponent(Z_INDEX.TREE);

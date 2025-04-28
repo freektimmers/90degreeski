@@ -205,14 +205,14 @@ export class Game {
 
     // Load assets first
     await Assets.load([
-      '/character.png',
-      '/tree.png',
-      '/coin.png',
-      '/vignette.png',
-      '/vignette2.png',
-      '/vignette3.png'
+      'character.png',
+      'tree.png',
+      'coin.png',
+      'vignette.png',
+      'vignette2.png',
+      'vignette3.png'
     ]);
-
+    
     // Reset stage position to center
     this.app.stage.position.set(
       this.app.screen.width / 2,
@@ -262,7 +262,7 @@ export class Game {
 
     // Set transform to the world position
     const transform = new TransformComponent(worldPos.x, worldPos.y);
-    const visual = new VisualComponent({ spritePath: '/character.png' });
+    const visual = new VisualComponent({ spritePath: 'character.png' });
     const movement = new IsometricMovementComponent(150);
     movement.targetDirection = Direction.DownRight; // Start moving down-right
     const zIndex = new ZIndexComponent(Z_INDEX.CHARACTER);
