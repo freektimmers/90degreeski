@@ -1,0 +1,11 @@
+# .cursor/rules/project-context.mdc
+---
+description: Always-on project defaults
+alwaysApply: true
+globs: []
+---
+
+- Use PIXIjs 8 at all times.
+- Avoid tight coupling between systems. Use ECS patterns instead
+- Uses ECS patterns
+- The project uses inversify for dependency injection

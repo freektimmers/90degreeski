@@ -16,7 +16,9 @@ export class VisualComponent implements Component {
     
     if (options.spritePath) {
       try {
-        const texture = Assets.get(options.spritePath);
+        // Add leading slash if not present
+        const assetPath = options.spritePath.startsWith('/') ? options.spritePath : `/${options.spritePath}`;
+        const texture = Assets.get(assetPath);
         this.sprite = new Sprite(texture);
         this.sprite.anchor.set(0.5);
         

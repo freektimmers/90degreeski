@@ -35,6 +35,5 @@ export default defineConfig({
     },
   },
   publicDir: 'public',
-  assetsInclude: ['**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.gif', '**/*.svg'],
-  base: '/90degreeski/',
+  assetsInclude: ['**/*.png', '**/*.jpg', '**/*.jpeg', '**/*.gif', '**/*.svg']
 });

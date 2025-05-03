@@ -25,7 +25,7 @@ export class UIComponent implements Component {
     const style: Partial<TextStyle> = {
       fontFamily: 'Arial',
       fontSize: 24,
-      fill: 0xFFFFFF,
+      fill: 0x000000,
       stroke: {
         color: 0x000000,
         width: 4

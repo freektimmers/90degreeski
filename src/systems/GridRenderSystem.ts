@@ -1,103 +1,123 @@
-import { injectable, inject } from 'inversify';
+import { injectable, inject, optional } from 'inversify';
 import { BaseSystem } from '../core/System';
 import { Entity } from '../core/Component';
-import { Application, Graphics, Container } from 'pixi.js';
+import { BaseEntity } from '../core/BaseEntity';
+import { Application, Graphics } from 'pixi.js';
 import { GridService } from '../services/GridService';
 import { TransformComponentType } from '../components/TransformComponent';
-import { World, GameState } from '../core/World';
-import { MovementSystem } from '../systems/MovementSystem';
-
-interface GridTile {
-  graphics: Graphics;
-  isInUse: boolean;
-  gridX: number;
-  gridY: number;
-}
+import { World } from '../core/World';
+import { TransformComponent } from '../components/TransformComponent';
+import { DebugOverlaySystem } from './DebugOverlaySystem';
+import { GridRenderStateComponent, GridTile, GridRenderStateComponentType } from '../components/GridRenderStateComponent';
+import { GameState, GameStateComponentType } from '../components/GameStateComponent';
+import { PlayerComponent, PlayerComponentType } from '../components/PlayerComponent';
+import { NeedsSpawnCheckComponent, NeedsSpawnCheckComponentType } from '../components/NeedsSpawnCheckComponent';
+import { GridPositionComponent, GridPositionComponentType } from '../components/GridPositionComponent';
+import { NeedsObjectRecyclingComponent } from '../components/NeedsObjectRecyclingComponent';
 
 @injectable()
 export class GridRenderSystem extends BaseSystem {
-  private gridContainer: Container;
-  private tilePool: GridTile[] = [];
-  private activeTiles: Map<string, GridTile> = new Map();
-  private readonly VISIBLE_RADIUS = 12;
-  private readonly POOL_SIZE = 600;
-  private lastCenterX = 0;
-  private lastCenterY = 0;
-  private isInitialized = false;
+  private readonly VISIBLE_RADIUS = 10;
+  private readonly POOL_SIZE = 800;
+  private debugOverlay: DebugOverlaySystem | null = null;
 
   readonly requiredComponents = [
-    TransformComponentType
+    GridRenderStateComponentType
   ];
 
   constructor(
-    @inject(GridService) private gridService: GridService
+    @inject(GridService) private gridService: GridService,
+    @optional() @inject(DebugOverlaySystem) debugOverlay?: DebugOverlaySystem
   ) {
     super();
-    this.gridContainer = new Container();
+    this.debugOverlay = debugOverlay || null;
   }
 
-  protected onGameStateChanged(oldState: GameState, newState: GameState): void {
-    if (newState === GameState.GameOver) {
-      // Stop processing updates (handled by World)
-    } else if (newState === GameState.Starting) {
-      this.initialize();
+  public onGameStateChanged(oldState: GameState, newState: GameState): void {
+    console.log(`[GridRenderSystem] Game state changed from ${oldState} to ${newState}`);
+    
+    if (newState === GameState.Starting) {
+      this.initializeGrid();
     }
   }
 
-  public initialize(): void {
-    if (!this.world || !this.app?.stage) return;
-
-    this.initializeTilePool();
-    
-    // Center the grid container on screen
-    this.gridContainer.position.set(0, 0);
-    // Add to world container instead of stage
-    const movementSystem = this.world.getSystem<MovementSystem>(MovementSystem);
-    if (movementSystem && movementSystem.worldContainer) {
-      movementSystem.worldContainer.addChildAt(this.gridContainer, 0);
+  private initializeGrid(): void {
+    if (!this.world) {
+      console.error('[GridRenderSystem] World not available during initialization');
+      return;
     }
-    this.tilePool.forEach(tile => this.gridContainer.addChild(tile.graphics));
+
+    if (!this.app?.stage) {
+      console.error('[GridRenderSystem] App stage not available during initialization');
+      return;
+    }
+
+    const gridState = this.world.getGridRenderState();
+    if (!gridState) {
+      console.error('[GridRenderSystem] Grid state not available');
+      return;
+    }
+
+    if (gridState.isInitialized) {
+      console.log('[GridRenderSystem] Grid already initialized');
+      return;
+    }
+
+    console.log('[GridRenderSystem] Initializing grid');
+
+    // Create graphics template and initialize pool
+    this.createTileGraphicsTemplate(gridState);
+    this.initializeTilePool(gridState);
     
-    // Show initial grid
+    // Center the grid container
+    gridState.container.position.set(0, 0);
+    
+    // Add to world container
+    const worldContainer = this.world.getWorldContainer();
+    if (worldContainer) {
+      console.log('[GridRenderSystem] Adding grid container to world container');
+      worldContainer.container.addChildAt(gridState.container, 0);
+    } else {
+      console.error('[GridRenderSystem] World container not available');
+      return;
+    }
+    
+    gridState.tilePool.forEach(tile => gridState.container.addChild(tile.graphics));
+    
+    // Show initial grid centered at 0,0
     this.updateVisibleTiles(0, 0);
-    this.isInitialized = true;
+    gridState.isInitialized = true;
+    this.updateDebugStats();
+    console.log('[GridRenderSystem] Grid initialization complete');
   }
 
-  public reset(): void {
-    // Return all tiles to the pool
-    for (const [key, tile] of this.activeTiles) {
-      this.recycleTile(tile);
+  private updateDebugStats(): void {
+    if (!this.debugOverlay || !this.world) return;
+    
+    const gridState = this.world.getGridRenderState();
+    if (!gridState) return;
+
+    this.debugOverlay.updateStats('GridRenderSystem', {
+      entities: gridState.activeTiles.size,
+      poolSize: this.POOL_SIZE,
+      activePoolItems: gridState.activeTiles.size
+    });
+  }
+
+  private createTileGraphicsTemplate(gridState: GridRenderStateComponent): void {
+    if (!this.gridService) {
+      throw new Error('[GridRenderSystem] GridService not available');
     }
 
-    // Clear active tiles map
-    this.activeTiles.clear();
-
-    // Reset the visible area tracking
-    this.lastCenterX = 0;
-    this.lastCenterY = 0;
-  }
-
-  private initializeTilePool(): void {
-    for (let i = 0; i < this.POOL_SIZE; i++) {
-      const graphics = new Graphics();
-      this.createTileGraphics(graphics);
-      graphics.visible = false;
-      
-      this.tilePool.push({
-        graphics,
-        isInUse: false,
-        gridX: 0,
-        gridY: 0
-      });
-    }
-  }
-
-  private createTileGraphics(graphics: Graphics): void {
     const { width, height } = this.gridService.getTileDimensions();
-    graphics.clear();
+    if (!width || !height) {
+      throw new Error('[GridRenderSystem] Invalid tile dimensions');
+    }
+
+    gridState.tileGraphicsTemplate = new Graphics();
     
     // Draw filled shape
-    graphics
+    gridState.tileGraphicsTemplate
       .setFillStyle({
         color: 0xffffff,
         alpha: 1
@@ -110,7 +130,7 @@ export class GridRenderSystem extends BaseSystem {
       .fill();
 
     // Draw outline
-    graphics
+    gridState.tileGraphicsTemplate
       .setStrokeStyle({
         width: 1,
         color: 0xCCCCCC,
@@ -124,124 +144,156 @@ export class GridRenderSystem extends BaseSystem {
       .stroke();
   }
 
+  private initializeTilePool(gridState: GridRenderStateComponent): void {
+    if (!gridState.tileGraphicsTemplate) {
+      throw new Error('[GridRenderSystem] Tile graphics template not created');
+    }
+
+    if (!this.gridService) {
+      throw new Error('[GridRenderSystem] GridService not available');
+    }
+
+    const { width, height } = this.gridService.getTileDimensions();
+    if (!width || !height) {
+      throw new Error('[GridRenderSystem] Invalid tile dimensions');
+    }
+
+    for (let i = 0; i < this.POOL_SIZE; i++) {
+      const graphics = new Graphics();
+      // Clone the template graphics by copying its commands
+      graphics.clear();
+      graphics
+        .setFillStyle({
+          color: 0xffffff,
+          alpha: 1
+        })
+        .setStrokeStyle({
+          width: 1,
+          color: 0xCCCCCC,
+          alpha: 1
+        })
+        .moveTo(0, -height/2)
+        .lineTo(width/2, 0)
+        .lineTo(0, height/2)
+        .lineTo(-width/2, 0)
+        .lineTo(0, -height/2)
+        .fill()
+        .stroke();
+      graphics.visible = false;
+      
+      // Create an entity for this tile
+      const entity = new BaseEntity();
+      if (this.world) {
+        this.world.addEntity(entity);
+      }
+
+      gridState.tilePool.push({
+        graphics,
+        isInUse: false,
+        gridX: 0,
+        gridY: 0,
+        entity
+      });
+    }
+  }
+
   private getTileKey(x: number, y: number): string {
     return `${x},${y}`;
   }
 
-  private getFreeTile(): GridTile | null {
-    return this.tilePool.find(tile => !tile.isInUse) || null;
+  private getFreeTile(gridState: GridRenderStateComponent): GridTile | null {
+    return gridState.tilePool.find(tile => !tile.isInUse) || null;
   }
 
-  private placeTile(gridX: number, gridY: number, centerX: number, centerY: number): void {
-    if (!this.world || this.world.getCurrentState() !== GameState.Playing) return;
+  private recycleTile(gridState: GridRenderStateComponent, tile: GridTile): void {
+    // Store current position before recycling
+    const currentGridX = tile.gridX;
+    const currentGridY = tile.gridY;
 
-    const key = this.getTileKey(gridX, gridY);
-    if (this.activeTiles.has(key)) return;
+    // Add recycling component with current position
+    const recycling = new NeedsObjectRecyclingComponent();
+    recycling.gridX = currentGridX;
+    recycling.gridY = currentGridY;
+    tile.entity.addComponent(recycling);
 
-    const tile = this.getFreeTile();
+    tile.graphics.visible = false;
+    tile.isInUse = false;
+    gridState.activeTiles.delete(this.getTileKey(tile.gridX, tile.gridY));
+    
+    // Reset position and remove grid position component
+    tile.gridX = 0;
+    tile.gridY = 0;
+    tile.entity.removeComponent(GridPositionComponentType);
+  }
+
+  private placeTile(gridState: GridRenderStateComponent, gridX: number, gridY: number, centerX: number, centerY: number): void {
+    const tile = this.getFreeTile(gridState);
     if (!tile) return;
 
-    // Use GridService for consistent world position calculation
-    const worldPos = this.gridService.worldToGrid(centerX, centerY);
-    
-    this.createTileGraphics(tile.graphics);
-    const tileWorldPos = this.gridService.gridToWorld(gridX, gridY);
-    tile.graphics.position.set(tileWorldPos.x, tileWorldPos.y);
+    const worldPos = this.gridService.gridToWorld(gridX, gridY);
+    tile.graphics.position.set(worldPos.x, worldPos.y);
     tile.graphics.visible = true;
     tile.isInUse = true;
     tile.gridX = gridX;
     tile.gridY = gridY;
+
+    gridState.activeTiles.set(this.getTileKey(gridX, gridY), tile);
+
+    // Update tile entity with grid position and mark for spawn checking
+    // Remove any existing components first to ensure clean state
+    tile.entity.removeComponent(GridPositionComponentType);
+    tile.entity.removeComponent(NeedsSpawnCheckComponentType);
     
-    this.activeTiles.set(key, tile);
-
-    // Emit an event for tile creation that TreeSystem can listen to
-    if (this.world) {
-      this.world.emit('tileCreated', { gridX, gridY });
-    }
-  }
-
-  private recycleTile(tile: GridTile): void {
-    const key = this.getTileKey(tile.gridX, tile.gridY);
-    tile.graphics.visible = false;
-    tile.isInUse = false;
-    this.activeTiles.delete(key);
+    const gridPos = new GridPositionComponent(gridX, gridY);
+    tile.entity.addComponent(gridPos);
+    tile.entity.addComponent(new NeedsSpawnCheckComponent());
   }
 
   private updateVisibleTiles(centerX: number, centerY: number): void {
-    if (!this.app || !this.world || this.world.getCurrentState() !== GameState.Playing) return;
+    const gridState = this.world?.getGridRenderState();
+    if (!gridState) return;
 
-    // Get the movement system to access the world container
-    const movementSystem = this.world.getSystem<MovementSystem>(MovementSystem);
-    if (!movementSystem?.worldContainer) {
-      // If the world container isn't ready yet, just return
-      return;
+    // Recycle tiles that are too far from center
+    for (const tile of gridState.activeTiles.values()) {
+      const dx = Math.abs(tile.gridX - centerX);
+      const dy = Math.abs(tile.gridY - centerY);
+      // Simple square visibility area
+      if (dx > this.VISIBLE_RADIUS || dy > this.VISIBLE_RADIUS) {
+        this.recycleTile(gridState, tile);
+      }
     }
 
-    // Use the world container's position to determine the center
-    const worldContainerPos = movementSystem.worldContainer.position;
-    if (!worldContainerPos) {
-      return;
-    }
-    
-    // Calculate the center in world coordinates
-    const centerWorldX = -worldContainerPos.x;
-    const centerWorldY = -worldContainerPos.y;
-
-    const worldPos = this.gridService.worldToGrid(centerWorldX, centerWorldY);
-    const gridCenterX = Math.floor(worldPos.x);
-    const gridCenterY = Math.floor(worldPos.y);
-
-    // Calculate visible area bounds
-    const minX = gridCenterX - this.VISIBLE_RADIUS;
-    const maxX = gridCenterX + this.VISIBLE_RADIUS;
-    const minY = gridCenterY - this.VISIBLE_RADIUS;
-    const maxY = gridCenterY + this.VISIBLE_RADIUS;
-
-    // Calculate which tiles should be visible
-    const neededTiles = new Set<string>();
-    
-    // Use symmetric bounds for tile placement
-    for (let gridX = minX; gridX <= maxX; gridX++) {
-      for (let gridY = minY; gridY <= maxY; gridY++) {
-        // Calculate Manhattan distance to center to create a more circular visible area
-        const distance = Math.abs(gridX - gridCenterX) + Math.abs(gridY - gridCenterY);
-        if (distance <= this.VISIBLE_RADIUS * 1.5) {
-          const key = this.getTileKey(gridX, gridY);
-          neededTiles.add(key);
-
-          // Place new tiles if needed
-          if (!this.activeTiles.has(key)) {
-            this.placeTile(gridX, gridY, centerWorldX, centerWorldY);
-          }
+    // Place new tiles within visible square radius
+    for (let y = centerY - this.VISIBLE_RADIUS; y <= centerY + this.VISIBLE_RADIUS; y++) {
+      for (let x = centerX - this.VISIBLE_RADIUS; x <= centerX + this.VISIBLE_RADIUS; x++) {
+        const key = this.getTileKey(x, y);
+        if (!gridState.activeTiles.has(key)) {
+          this.placeTile(gridState, x, y, centerX, centerY);
         }
       }
     }
 
-    // Recycle tiles that are no longer visible
-    for (const [key, tile] of this.activeTiles) {
-      if (!neededTiles.has(key)) {
-        this.recycleTile(tile);
-      }
-    }
+    this.updateDebugStats();
   }
 
   protected updateRelevantEntities(entities: Entity[], deltaTime: number): void {
-    if (!this.app?.stage || !this.isInitialized) return;
-    if (!this.world || this.world.getCurrentState() !== GameState.Playing) return;
+    if (!this.world) return;
 
-    // Get the movement system to access the world container
-    const movementSystem = this.world.getSystem<MovementSystem>(MovementSystem);
-    if (!movementSystem?.worldContainer) {
-      // If the world container isn't ready yet, just return
-      return;
+    const gameState = this.world.getGameState();
+    if (!gameState || gameState.currentState !== GameState.Playing) return;
+
+    // Find player position to center grid around
+    const playerEntities = this.world.getEntities().filter(entity => 
+      entity.hasComponent(TransformComponentType) && entity.hasComponent(PlayerComponentType)
+    );
+
+    for (const entity of playerEntities) {
+      const transform = entity.getComponent<TransformComponent>(TransformComponentType);
+      if (transform) {
+        const gridPos = this.gridService.worldToGrid(transform.x, transform.y);
+        this.updateVisibleTiles(Math.round(gridPos.x), Math.round(gridPos.y));
+        break; // Only use first player entity
+      }
     }
-
-    // Use the world container's position
-    const worldContainerPos = movementSystem.worldContainer.position;
-    if (!worldContainerPos) {
-      return;
-    }
-
-    this.updateVisibleTiles(worldContainerPos.x, worldContainerPos.y);
   }
 }

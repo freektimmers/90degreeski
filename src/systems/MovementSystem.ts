@@ -6,159 +6,223 @@ import { VisualComponent, VisualComponentType } from '../components/VisualCompon
 import { IsometricMovementComponent, IsometricMovementComponentType, Direction } from '../components/IsometricMovementComponent';
 import { GridPositionComponent, GridPositionComponentType } from '../components/GridPositionComponent';
 import { GridService } from '../services/GridService';
-import { Container } from 'pixi.js';
-import { Application } from 'pixi.js';
-import { ParticleComponent, ParticleComponentType } from '../components/ParticleComponent';
+import { GridOccupancyService, OccupancyType } from '../services/GridOccupancyService';
+import { PlayerComponent, PlayerComponentType } from '../components/PlayerComponent';
+import { GameState } from '../components/GameStateComponent';
+import { SpeedBoostComponent, SpeedBoostComponentType } from '@/components/SpeedBoostComponent';
+import { TreeComponent, TreeComponentType } from '../components/TreeComponent';
+import { CollisionComponent, CollisionComponentType } from '../components/CollisionComponent';
+import { TreeCollisionImminentComponentType } from '../components/TreeCollisionImminent';
 
 @injectable()
 export class MovementSystem extends BaseSystem {
-  public worldContainer: Container | null = null;
+    private readonly MIN_DELTA = 1/120; // Increased precision for smoother movement
+    private readonly MAX_DELTA = 1/30; // Cap delta time to prevent large jumps
+    private readonly INTERPOLATION_FACTOR = 0.85; // Smoothing factor for movement
+    private readonly SPEED_ADAPTATION_RATE = 0.1; // How quickly to adapt to frame rate changes
+    private readonly MIN_SPEED_MULTIPLIER = 0.8;
+    private readonly MAX_SPEED_MULTIPLIER = 1.2;
+    private speedMultiplier = 1.0; // Dynamic speed multiplier
 
-  readonly requiredComponents = [
-    TransformComponentType,
-    VisualComponentType,
-    IsometricMovementComponentType,
-    GridPositionComponentType
-  ];
+    readonly requiredComponents = [
+        TransformComponentType,
+        VisualComponentType,
+        IsometricMovementComponentType,
+        GridPositionComponentType,
+        SpeedBoostComponentType
+    ];
 
-  constructor(
-    @inject(GridService) private gridService: GridService
-  ) {
-    super();
-  }
-
-  public setApp(app: Application): void {
-    super.setApp(app);
-    if (app) {
-      this.initializeWorldContainer();
+    constructor(
+        @inject(GridService) private gridService: GridService,
+        @inject(GridOccupancyService) private gridOccupancyService: GridOccupancyService
+    ) {
+        super();
     }
-  }
 
-  private initializeWorldContainer(): void {
-    if (!this.app) return;
-    
-    // Create a world container that will be moved around
-    this.worldContainer = new Container();
-    this.app.stage.addChild(this.worldContainer);
-    this.worldContainer.position.set(0, 0);
-  }
-
-  public cleanup(): void {
-    if (this.worldContainer && this.app) {
-      this.app.stage.removeChild(this.worldContainer);
-      this.worldContainer.destroy();
-      this.worldContainer = null;
+    private updateSpeedMultiplier(deltaTime: number): void {
+        // Adapt speed based on frame rate
+        const targetMultiplier = (1/60) / deltaTime; // Target 60 FPS
+        const clampedTarget = Math.max(
+            this.MIN_SPEED_MULTIPLIER,
+            Math.min(this.MAX_SPEED_MULTIPLIER, targetMultiplier)
+        );
+        
+        // Smoothly interpolate to target
+        this.speedMultiplier += (clampedTarget - this.speedMultiplier) * this.SPEED_ADAPTATION_RATE;
     }
-  }
 
-  public reinitialize(): void {
-    this.cleanup();
-    this.initializeWorldContainer();
-  }
+    private isTreeCollisionBeingHandled(): boolean {
+        if (!this.world) return false;
+        
+        // Check all entities with TreeComponent and CollisionComponent
+        const collidingTree = this.world.getEntities().find(entity => 
+            entity.hasComponent(TreeComponentType) &&
+            entity.hasComponent(CollisionComponentType) &&
+            entity.getComponent<CollisionComponent>(CollisionComponentType)?.isBeingHandled
+        );
 
-  protected updateRelevantEntities(entities: Entity[], deltaTime: number): void {
-    if (!this.worldContainer || !this.app) return;
+        if (!collidingTree) return false;
 
-    for (const entity of entities) {
-      const transform = entity.getComponent<TransformComponent>(TransformComponentType);
-      const movement = entity.getComponent<IsometricMovementComponent>(IsometricMovementComponentType);
-      const gridPos = entity.getComponent<GridPositionComponent>(GridPositionComponentType);
-      const visual = entity.getComponent<VisualComponent>(VisualComponentType);
-      const particleComponent = entity.getComponent<ParticleComponent>(ParticleComponentType);
-      
-      if (transform && movement && gridPos && visual) {
-        // Only set new target position if we're not already moving
-        if (!gridPos.isMoving && movement.targetDirection !== Direction.None) {
-          const nextPosition = this.gridService.getNextGridPosition(
-            gridPos.gridX,
-            gridPos.gridY,
-            movement.targetDirection
-          );
+        // Only stop movement if we've reached the tree's position
+        const collision = collidingTree.getComponent<CollisionComponent>(CollisionComponentType);
+        if (!collision || !collision.collidedWith) return false;
 
-          gridPos.setTargetPosition(nextPosition.x, nextPosition.y);
-          movement.currentDirection = movement.targetDirection;
-          movement.isMoving = true;
-          gridPos.isMoving = true;
+        const playerPos = collision.collidedWith.getComponent<GridPositionComponent>(GridPositionComponentType);
+        const treePos = collidingTree.getComponent<GridPositionComponent>(GridPositionComponentType);
 
-          // Update particle direction when starting movement
-          if (particleComponent) {
-            const direction = this.getDirectionVector(movement.targetDirection);
-            particleComponent.lastDirection = direction;
-            particleComponent.isActive = true;
-          }
-        }
+        if (!playerPos || !treePos) return false;
 
-        if (gridPos.isMoving) {
-          // Calculate current and target positions in world space
-          const targetWorldPos = this.gridService.gridToWorld(gridPos.targetGridX, gridPos.targetGridY);
-          
-          // Calculate direction and distance to target
-          const dx = targetWorldPos.x - transform.x;
-          const dy = targetWorldPos.y - transform.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
+        // Only stop movement if we're at the tree's position
+        return playerPos.gridX === treePos.gridX && playerPos.gridY === treePos.gridY;
+    }
 
-          if (distance < 1) {
-            // Reached target grid position
-            transform.x = targetWorldPos.x;
-            transform.y = targetWorldPos.y;
-            gridPos.gridX = gridPos.targetGridX;
-            gridPos.gridY = gridPos.targetGridY;
-            gridPos.isMoving = false;
-            movement.isMoving = false;
-            movement.currentDirection = Direction.None;
+    private updateCamera(x: number, y: number): void {
+        const worldContainer = this.world?.getWorldContainer();
+        if (!worldContainer) return;
 
-            // Stop particles when movement ends
-            if (particleComponent) {
-              particleComponent.isActive = false;
+        // Directly set camera position to center on character
+        worldContainer.container.position.x = -x;
+        worldContainer.container.position.y = -y;
+
+        // Update stored camera position
+        worldContainer.cameraX = worldContainer.container.position.x;
+        worldContainer.cameraY = worldContainer.container.position.y;
+    }
+
+    private canMoveToPosition(x: number, y: number): boolean {
+        // Only check if the position is valid on the grid
+        return this.gridService.isValidGridPosition(x, y);
+    }
+
+    private updateEntityMovement(entity: Entity, deltaTime: number): void {
+        // If a tree collision is being handled, don't allow any movement
+        if (this.isTreeCollisionBeingHandled()) return;
+
+        const transform = entity.getComponent<TransformComponent>(TransformComponentType);
+        const gridPos = entity.getComponent<GridPositionComponent>(GridPositionComponentType);
+        const visual = entity.getComponent<VisualComponent>(VisualComponentType);
+        const movement = entity.getComponent<IsometricMovementComponent>(IsometricMovementComponentType);
+        const speedBoost = entity.getComponent<SpeedBoostComponent>(SpeedBoostComponentType);
+
+        if (!transform || !gridPos || !visual || !movement) return;
+
+        // Handle movement direction changes
+        if (movement.targetDirection !== movement.currentDirection) {
+            // If tree collision is imminent, ignore direction changes
+            if (entity.hasComponent(TreeCollisionImminentComponentType)) {
+                movement.targetDirection = movement.currentDirection;
+                return;
             }
-          } else {
-            // Move towards target using the movement component's speed
-            const moveDistance = movement.speed * deltaTime;
-            const ratio = Math.min(moveDistance / distance, 1);
 
-            transform.x += dx * ratio;
-            transform.y += dy * ratio;
-          }
-
-          // Update visual position
-          visual.container.position.set(transform.x, transform.y);
-
-          // Center camera on character immediately without smoothing
-          if (this.worldContainer && this.app) {
-            // Calculate the position that will center the character on screen
-            const screenCenterX = 0;
-            const screenCenterY = 0;
+            // Only change direction when close enough to a grid position
+            const currentWorldPos = { x: transform.x, y: transform.y };
+            const currentGridPos = this.gridService.worldToGrid(currentWorldPos.x, currentWorldPos.y);
+            const snappedWorldPos = this.gridService.snapToGrid(currentWorldPos.x, currentWorldPos.y);
             
-            // Move the world container to center the character
-            this.worldContainer.position.x = screenCenterX - transform.x;
-            this.worldContainer.position.y = screenCenterY - transform.y;
-          }
-        } else {
-          // Even when not moving, ensure the character is centered
-          if (this.worldContainer && this.app) {
-            const screenCenterX = 0;
-            const screenCenterY = 0;
+            // More forgiving grid point detection during frame drops
+            const threshold = this.gridService.GRID_ARRIVAL_THRESHOLD * 
+                Math.min(2.0, Math.max(1.0, 1/deltaTime/30));
             
-            this.worldContainer.position.x = screenCenterX - transform.x;
-            this.worldContainer.position.y = screenCenterY - transform.y;
-          }
+            const isOnGridPoint = 
+                Math.abs(currentWorldPos.x - snappedWorldPos.x) < threshold &&
+                Math.abs(currentWorldPos.y - snappedWorldPos.y) < threshold;
+
+            if (isOnGridPoint) {
+                // Snap to grid when changing direction for precision
+                transform.x = snappedWorldPos.x;
+                transform.y = snappedWorldPos.y;
+                visual.container.position.set(transform.x, transform.y);
+
+                const nextPos = this.gridService.getNextGridPosition(
+                    Math.round(currentGridPos.x),
+                    Math.round(currentGridPos.y),
+                    movement.targetDirection
+                );
+
+                if (this.canMoveToPosition(nextPos.x, nextPos.y)) {
+                    gridPos.setTargetPosition(nextPos.x, nextPos.y);
+                    movement.currentDirection = movement.targetDirection;
+                } else {
+                    movement.targetDirection = Direction.None;
+                    movement.currentDirection = Direction.None;
+                }
+            }
         }
-      }
-    }
-  }
 
-  private getDirectionVector(direction: Direction): { x: number, y: number } {
-    switch (direction) {
-      case Direction.TopRight:
-        return { x: 1, y: -1 };
-      case Direction.TopLeft:
-        return { x: -1, y: -1 };
-      case Direction.DownRight:
-        return { x: 1, y: 1 };
-      case Direction.DownLeft:
-        return { x: -1, y: 1 };
-      default:
-        return { x: 0, y: 0 };
+        // Handle movement
+        if (movement.currentDirection !== Direction.None) {
+            const targetWorldPos = this.gridService.gridToWorld(gridPos.targetGridX, gridPos.targetGridY);
+            const dx = targetWorldPos.x - transform.x;
+            const dy = targetWorldPos.y - transform.y;
+            const distanceToTarget = Math.sqrt(dx * dx + dy * dy);
+
+            // Update speed multiplier based on frame rate
+            this.updateSpeedMultiplier(deltaTime);
+
+            if (distanceToTarget < this.gridService.GRID_ARRIVAL_THRESHOLD) {
+                // Store our exact current position before any updates
+                const exactCurrentPos = { x: transform.x, y: transform.y };
+                
+                // Update logical grid position
+                gridPos.gridX = gridPos.targetGridX;
+                gridPos.gridY = gridPos.targetGridY;
+
+                // Get next position in current direction
+                const nextPos = this.gridService.getNextGridPosition(
+                    gridPos.gridX,
+                    gridPos.gridY,
+                    movement.currentDirection
+                );
+
+                if (this.canMoveToPosition(nextPos.x, nextPos.y)) {
+                    gridPos.setTargetPosition(nextPos.x, nextPos.y);
+                    
+                    // Keep our exact position
+                    transform.x = exactCurrentPos.x;
+                    transform.y = exactCurrentPos.y;
+                    visual.container.position.set(transform.x, transform.y);
+                } else {
+                    movement.currentDirection = Direction.None;
+                }
+            } else {
+                // Calculate adaptive movement speed
+                const baseSpeed = (this.gridService.MOVEMENT_SPEED) * deltaTime * this.speedMultiplier;
+                const boostMultiplier = speedBoost ? speedBoost.speedMultiplier : 1.0;
+                const speed = baseSpeed * boostMultiplier;
+                
+                // Calculate smooth movement with interpolation
+                const ratio = Math.min(speed / distanceToTarget, 1);
+                const smoothRatio = 1 - Math.pow(1 - ratio, this.INTERPOLATION_FACTOR);
+                
+                // Update position with interpolation
+                transform.x += dx * smoothRatio;
+                transform.y += dy * smoothRatio;
+                
+                // Update visual position
+                visual.container.position.set(transform.x, transform.y);
+            }
+        }
     }
-  }
+
+    protected updateRelevantEntities(entities: Entity[], deltaTime: number): void {
+        if (!this.world) return;
+
+        const gameState = this.world.getGameState();
+        if (!gameState || gameState.currentState !== GameState.Playing) return;
+
+        // Cap delta time to prevent large jumps
+        deltaTime = Math.max(Math.min(deltaTime, this.MAX_DELTA), this.MIN_DELTA);
+
+        for (const entity of entities) {
+            this.updateEntityMovement(entity, deltaTime);
+
+            // Update camera for player entity
+            if (entity.hasComponent(PlayerComponentType)) {
+                const transform = entity.getComponent<TransformComponent>(TransformComponentType);
+                if (transform) {
+                    this.updateCamera(transform.x, transform.y);
+                }
+            }
+        }
+    }
 } 

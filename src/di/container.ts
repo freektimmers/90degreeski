@@ -4,49 +4,67 @@ import { Game } from '../core/Game';
 import { MovementSystem } from '../systems/MovementSystem';
 import { InputSystem } from '../systems/InputSystem';
 import { GridRenderSystem } from '../systems/GridRenderSystem';
-import { TreeSystem } from '../systems/TreeSystem';
 import { ZIndexSystem } from '../systems/ZIndexSystem';
-import { CoinSystem } from '../systems/CoinSystem';
 import { GridService } from '../services/GridService';
 import { GridOccupancyService } from '../services/GridOccupancyService';
-import { UIRenderSystem } from '../systems/UIRenderSystem';
 import { CoinCounterSystem } from '../systems/CoinCounterSystem';
 import { ParticleSystem } from '../systems/ParticleSystem';
-import { SpeedBoostSystem } from '../systems/SpeedBoostSystem';
-import { VignetteSystem } from '../systems/VignetteSystem';
+// import { DebugOverlaySystem } from '../systems/DebugOverlaySystem';
+import { GridOccupancySystem } from '../systems/GridOccupancySystem';
+import { CollisionSystem } from '../systems/CollisionSystem';
+import { CoinCollisionSystem } from '../systems/CoinCollisionSystem';
+import { TreeCollisionSystem } from '../systems/TreeCollisionSystem';
+import { GridObjectSpawnerSystem } from '../systems/GridObjectSpawnerSystem';
+import { BaseEntity } from '../core/BaseEntity';
+import { SpawnRuleComponent } from '../components/SpawnRuleComponent';
+import { TREE_SPAWN_CONFIG, COIN_SPAWN_CONFIG } from '../config/spawnRules';
+import { VignetteUISystem } from '../systems/VignetteUISystem';
+import { ObjectRecyclingSystem } from '../systems/ObjectRecyclingSystem';
 
 export function createContainer(): Container {
   const container = new Container();
 
-  // Create a factory function for World that takes the container
-  const worldFactory = (c: Container) => {
-    return new World(c);
-  };
+  // Register services
+  container.bind(GridService).toSelf().inSingletonScope();
+  container.bind(GridOccupancyService).toSelf().inSingletonScope();
+  // container.bind(DebugOverlaySystem).toSelf().inSingletonScope();
 
-  // Bind World as a factory to ensure fresh instances
-  container.bind<World>(World).toFactory<World>((context) => {
-    return () => worldFactory(container);
-  });
+  // Create and bind world
+  const world = new World(container);
 
-  // Bind Game as a singleton
-  container.bind<Game>(Game).toSelf().inSingletonScope();
+  // Register systems first
+  container.bind(MovementSystem).toSelf().inSingletonScope();
+  container.bind(InputSystem).toSelf().inSingletonScope();
+  container.bind(GridRenderSystem).toSelf().inSingletonScope();
+  container.bind(ZIndexSystem).toSelf().inSingletonScope();
+  container.bind(CoinCounterSystem).toSelf().inSingletonScope();
+  container.bind(ParticleSystem).toSelf().inSingletonScope();
+  container.bind(GridOccupancySystem).toSelf().inSingletonScope();
+  container.bind(CollisionSystem).toSelf().inSingletonScope();
+  container.bind(CoinCollisionSystem).toSelf().inSingletonScope();
+  container.bind(TreeCollisionSystem).toSelf().inSingletonScope();
+  container.bind(GridObjectSpawnerSystem).toSelf().inSingletonScope();
+  container.bind(ObjectRecyclingSystem).toSelf().inSingletonScope();
+  container.bind(VignetteUISystem).toSelf().inSingletonScope();
 
-  // Bind all systems as singletons
-  container.bind<MovementSystem>(MovementSystem).toSelf().inSingletonScope();
-  container.bind<InputSystem>(InputSystem).toSelf().inSingletonScope();
-  container.bind<GridRenderSystem>(GridRenderSystem).toSelf().inSingletonScope();
-  container.bind<TreeSystem>(TreeSystem).toSelf().inSingletonScope();
-  container.bind<ZIndexSystem>(ZIndexSystem).toSelf().inSingletonScope();
-  container.bind<CoinSystem>(CoinSystem).toSelf().inSingletonScope();
-  container.bind<UIRenderSystem>(UIRenderSystem).toSelf().inSingletonScope();
-  container.bind<CoinCounterSystem>(CoinCounterSystem).toSelf().inSingletonScope();
-  container.bind<ParticleSystem>(ParticleSystem).toSelf().inSingletonScope();
-  container.bind<SpeedBoostSystem>(SpeedBoostSystem).toSelf().inSingletonScope();
-  container.bind<VignetteSystem>(VignetteSystem).toSelf().inSingletonScope();
+  // Register world
+  container.bind(World).toConstantValue(world);
 
-  // Bind services as singletons
-  container.bind<GridService>(GridService).toSelf().inSingletonScope();
-  container.bind<GridOccupancyService>(GridOccupancyService).toSelf().inSingletonScope();
+  // Register game
+  container.bind(Game).toSelf().inSingletonScope();
+
+  // Create spawn rule entities
+  const treeSpawnRuleEntity = new BaseEntity();
+  treeSpawnRuleEntity.addComponent(new SpawnRuleComponent(TREE_SPAWN_CONFIG));
+  world.addEntity(treeSpawnRuleEntity);
+
+  const coinSpawnRuleEntity = new BaseEntity();
+  coinSpawnRuleEntity.addComponent(new SpawnRuleComponent(COIN_SPAWN_CONFIG));
+  world.addEntity(coinSpawnRuleEntity);
+
+  // Create manager entities last, after all systems are registered
+  console.log('[Container] Creating manager entities...');
+  world.createManagerEntities();
 
   return container;
 } 

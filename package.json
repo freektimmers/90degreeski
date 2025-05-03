@@ -15,11 +15,13 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "gsap": "^3.12.5",
     "inversify": "^6.0.1",
     "pixi.js": "^8.0.2",
     "reflect-metadata": "~0.2.2"
   },
   "devDependencies": {
+    "@types/gsap": "^1.20.2",
     "@types/node": "^22.15.2",
     "gh-pages": "^6.3.0",
     "terser": "^5.39.0",

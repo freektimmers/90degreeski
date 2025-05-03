@@ -5,44 +5,52 @@ import { IsometricMovementComponent, IsometricMovementComponentType, Direction }
 import { GridPositionComponent, GridPositionComponentType } from '../components/GridPositionComponent';
 import { VisualComponent, VisualComponentType } from '../components/VisualComponent';
 import { Application } from 'pixi.js';
+import { World } from '../core/World';
 
 @injectable()
 export class InputSystem extends BaseSystem {
-  private queuedDirectionChange = false;
-  private isMovingDownRight = true; // Start with down-right direction
-  private needsFlip = false; // Track if we need to flip the sprite
-
   readonly requiredComponents = [
     IsometricMovementComponentType,
     VisualComponentType,
     GridPositionComponentType
   ];
 
-  public reset(): void {
-    // Reset input state
-    this.queuedDirectionChange = false;
-    this.isMovingDownRight = true; // Reset to initial direction (down-right)
-    this.needsFlip = false;
-  }
-
-  setApp(app: Application): void {
+  public setApp(app: Application): void {
     super.setApp(app);
-    if (app.canvas) {
-      app.canvas.addEventListener('click', () => this.handleTap());
-      app.canvas.addEventListener('touchstart', () => this.handleTap());
+    if (app) {
+      app.stage.eventMode = 'static';
+      app.stage.on('pointerdown', () => this.handleTap());
     }
   }
 
-  private handleTap() {
-    // Only accept new input if we're not already processing a direction change
-    if (!this.queuedDirectionChange) {
-      this.queuedDirectionChange = true;
-      this.needsFlip = true;
+  private handleTap(): void {
+    if (!this.world) return;
+    
+    const inputState = this.world.getInputState();
+    if (!inputState) return;
+
+    const now = Date.now();
+    if (now - inputState.lastTapTime < inputState.TAP_DEBOUNCE) return;
+    inputState.lastTapTime = now;
+    
+    // Queue the direction change for next grid cell
+    inputState.queuedDirectionChange = true;
+  }
+
+  private updateVisualDirection(visual: VisualComponent, isMovingRight: boolean): void {
+    if (!visual.sprite) return;
+
+    const desiredScale = isMovingRight ? -Math.abs(visual.sprite.scale.x) : Math.abs(visual.sprite.scale.x);
+    if (visual.sprite.scale.x !== desiredScale) {
+        visual.sprite.scale.x = desiredScale;
     }
   }
 
   protected updateRelevantEntities(entities: Entity[], deltaTime: number): void {
-    if (!this.queuedDirectionChange && !this.needsFlip) return;
+    if (!this.world) return;
+    
+    const inputState = this.world.getInputState();
+    if (!inputState) return;
 
     for (const entity of entities) {
       const movement = entity.getComponent<IsometricMovementComponent>(IsometricMovementComponentType);
@@ -50,17 +58,20 @@ export class InputSystem extends BaseSystem {
       const visual = entity.getComponent<VisualComponent>(VisualComponentType);
       
       if (movement && gridPos && visual) {
-        // Handle sprite flipping immediately on input
-        if (this.needsFlip) {
-          visual.flipX();
-          this.needsFlip = false;
-        }
-
-        // Handle movement direction change when reaching tile center
-        if (this.queuedDirectionChange && !gridPos.isMoving) {
-          this.isMovingDownRight = !this.isMovingDownRight;
-          movement.targetDirection = this.isMovingDownRight ? Direction.DownRight : Direction.DownLeft;
-          this.queuedDirectionChange = false;
+        // Queue direction change
+        if (inputState.queuedDirectionChange) {
+          // Toggle direction immediately for visuals
+          inputState.isMovingDownRight = !inputState.isMovingDownRight;
+          
+          // Update visual direction immediately
+          this.updateVisualDirection(visual, inputState.isMovingDownRight);
+          
+          // Queue the actual movement direction change
+          const newDirection = inputState.isMovingDownRight ? Direction.DownRight : Direction.DownLeft;
+          movement.targetDirection = newDirection;
+          
+          // Clear the queue
+          inputState.queuedDirectionChange = false;
         }
       }
     }

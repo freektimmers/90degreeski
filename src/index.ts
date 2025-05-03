@@ -2,9 +2,17 @@ import 'reflect-metadata';
 import { createContainer } from './di/container';
 import { Game } from './core/Game';
 
-// Create container and get the game instance
-const container = createContainer();
-const game = container.get<Game>(Game);
+async function main() {
+  const container = createContainer();
+  const game = container.get(Game);
+  
+  await game.initialize();
+  game.start();
 
-// Start the game
-game.start(); 
+  // Handle window resize
+  window.addEventListener('resize', () => {
+    game.resize(window.innerWidth, window.innerHeight);
+  });
+}
+
+main().catch(console.error); 

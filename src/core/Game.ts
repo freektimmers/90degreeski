@@ -1,12 +1,10 @@
-import { Application, Assets } from 'pixi.js';
 import { injectable, inject } from 'inversify';
-import { World, GameState } from './World';
+import { Application, Assets } from 'pixi.js';
+import { World } from './World';
 import { MovementSystem } from '../systems/MovementSystem';
 import { InputSystem } from '../systems/InputSystem';
 import { GridRenderSystem } from '../systems/GridRenderSystem';
-import { TreeSystem } from '../systems/TreeSystem';
 import { ZIndexSystem } from '../systems/ZIndexSystem';
-import { CoinSystem } from '../systems/CoinSystem';
 import { BaseEntity } from './BaseEntity';
 import { TransformComponent } from '../components/TransformComponent';
 import { VisualComponent, VisualComponentType } from '../components/VisualComponent';
@@ -14,69 +12,63 @@ import { IsometricMovementComponent, Direction } from '../components/IsometricMo
 import { GridPositionComponent } from '../components/GridPositionComponent';
 import { ZIndexComponent } from '../components/ZIndexComponent';
 import { PlayerComponent } from '../components/PlayerComponent';
-import { GridOccupancyService } from '../services/GridOccupancyService';
-import { UIRenderSystem } from '../systems/UIRenderSystem';
 import { CoinCounterSystem } from '../systems/CoinCounterSystem';
 import { UIComponent, UIComponentType } from '../components/UIComponent';
 import { CoinCounterComponent } from '../components/CoinCounterComponent';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { ParticleComponent } from '../components/ParticleComponent';
 import { SpeedBoostComponent } from '../components/SpeedBoostComponent';
-import { SpeedBoostSystem } from '../systems/SpeedBoostSystem';
-import { VignetteSystem } from '../systems/VignetteSystem';
-
-// Z-index base values for different entity types
-const Z_INDEX = {
-  TILE: 0,
-  TREE: 100,
-  CHARACTER: 200
-};
+// import { DebugOverlaySystem } from '../systems/DebugOverlaySystem';
+import { GridOccupancyComponent, OccupancyType } from '../components/GridOccupancyComponent';
+import { GridOccupancySystem } from '../systems/GridOccupancySystem';
+import { CollisionSystem } from '../systems/CollisionSystem';
+import { CoinCollisionSystem } from '../systems/CoinCollisionSystem';
+import { TreeCollisionSystem } from '../systems/TreeCollisionSystem';
+import { GridObjectSpawnerSystem } from '../systems/GridObjectSpawnerSystem';
+import { GridService } from '@/services/GridService';
+import { GameState } from '../components/GameStateComponent';
+import { VignetteUISystem } from '../systems/VignetteUISystem';
+import { VignetteUIComponent } from '../components/VignetteUIComponent';
+import { ObjectRecyclingSystem } from '../systems/ObjectRecyclingSystem';
 
 @injectable()
 export class Game {
   private app!: Application;
   private world: World;
-  private lastTime: number;
-  private readonly TILE_WIDTH = 128;
-  private readonly TILE_HEIGHT = 64;
+  private lastTime: number = 0;
   private character: BaseEntity | null = null;
-  private gridOccupancyService: GridOccupancyService | null = null;
   private coinCounter: BaseEntity | null = null;
+  private vignette: BaseEntity | null = null;
+  private isRunning: boolean = false;
 
   constructor(
-    @inject(World) worldFactory: () => World,
+    @inject(World) world: World,
     @inject(MovementSystem) private movementSystem: MovementSystem,
     @inject(InputSystem) private inputSystem: InputSystem,
     @inject(GridRenderSystem) private gridRenderSystem: GridRenderSystem,
-    @inject(TreeSystem) private treeSystem: TreeSystem,
     @inject(ZIndexSystem) private zIndexSystem: ZIndexSystem,
-    @inject(CoinSystem) private coinSystem: CoinSystem,
-    @inject(UIRenderSystem) private uiRenderSystem: UIRenderSystem,
     @inject(CoinCounterSystem) private coinCounterSystem: CoinCounterSystem,
     @inject(ParticleSystem) private particleSystem: ParticleSystem,
-    @inject(SpeedBoostSystem) private speedBoostSystem: SpeedBoostSystem,
-    @inject(VignetteSystem) private vignetteSystem: VignetteSystem
+    // @inject(DebugOverlaySystem) private debugOverlaySystem: DebugOverlaySystem,
+    @inject(GridOccupancySystem) private gridOccupancySystem: GridOccupancySystem,
+    @inject(CollisionSystem) private collisionSystem: CollisionSystem,
+    @inject(CoinCollisionSystem) private coinCollisionSystem: CoinCollisionSystem,
+    @inject(TreeCollisionSystem) private treeCollisionSystem: TreeCollisionSystem,
+    @inject(GridObjectSpawnerSystem) private gridObjectSpawnerSystem: GridObjectSpawnerSystem,
+    @inject(GridService) private gridService: GridService,
+    @inject(VignetteUISystem) private vignetteUISystem: VignetteUISystem,
+    @inject(ObjectRecyclingSystem) private objectRecyclingSystem: ObjectRecyclingSystem,
   ) {
-    this.world = worldFactory();
-    this.world.addSystem(gridRenderSystem);
-    this.world.addSystem(movementSystem);
-    this.world.addSystem(inputSystem);
-    this.world.addSystem(treeSystem);
-    this.world.addSystem(zIndexSystem);
-    this.world.addSystem(coinSystem);
-    this.world.addSystem(uiRenderSystem);
-    this.world.addSystem(coinCounterSystem);
-    this.world.addSystem(particleSystem);
-    this.world.addSystem(speedBoostSystem);
-    this.world.addSystem(vignetteSystem);
-    this.lastTime = performance.now();
+    this.world = world;
     this.gameLoop = this.gameLoop.bind(this);
 
-    // Listen for game over event
-    this.world.on('gameOver', () => {
-      setTimeout(() => {
-        this.restart();
-      }, 1000);
+    // Listen for game state changes
+    this.world.on('gameStateChanged', ({ newState }) => {
+      if (newState === GameState.GameOver) {
+        setTimeout(() => {
+          this.restart();
+        }, 1000);
+      }
     });
 
     // Listen for character creation events
@@ -85,166 +77,144 @@ export class Game {
     });
   }
 
-  private async initializeSystems(): Promise<void> {
-    // Get fresh instances of all systems from the container
-    const container = this.world.container;
-    this.movementSystem = container.get<MovementSystem>(MovementSystem);
-    this.inputSystem = container.get<InputSystem>(InputSystem);
-    this.gridRenderSystem = container.get<GridRenderSystem>(GridRenderSystem);
-    this.treeSystem = container.get<TreeSystem>(TreeSystem);
-    this.zIndexSystem = container.get<ZIndexSystem>(ZIndexSystem);
-    this.coinSystem = container.get<CoinSystem>(CoinSystem);
-    this.uiRenderSystem = container.get<UIRenderSystem>(UIRenderSystem);
-    this.coinCounterSystem = container.get<CoinCounterSystem>(CoinCounterSystem);
-    this.particleSystem = container.get<ParticleSystem>(ParticleSystem);
-    this.speedBoostSystem = container.get<SpeedBoostSystem>(SpeedBoostSystem);
-    this.vignetteSystem = container.get<VignetteSystem>(VignetteSystem);
+  private setupStage(): void {
+    // Center the stage
+    this.app.stage.position.set(this.app.screen.width / 2, this.app.screen.height / 2);
 
-    // Get a new world instance using the factory
-    const worldFactory = container.get<() => World>(World);
-    this.world = worldFactory();
+    // Get world container and add to stage
+    const worldContainer = this.world.getWorldContainer();
+    if (worldContainer) {
+      this.app.stage.addChild(worldContainer.container);
+      worldContainer.container.position.set(0, 0);
+    }
 
-    // Set up app references first
-    this.movementSystem.setApp(this.app);
-    this.inputSystem.setApp(this.app);
-    this.gridRenderSystem.setApp(this.app);
-    this.treeSystem.setApp(this.app);
-    this.zIndexSystem.setApp(this.app);
-    this.coinSystem.setApp(this.app);
-    this.uiRenderSystem.setApp(this.app);
-    this.particleSystem.setApp(this.app);
-    this.speedBoostSystem.setApp(this.app);
-    this.vignetteSystem.setApp(this.app);
-
-    // Then set up the world references
-    this.treeSystem.setWorld(this.world);
-    this.coinSystem.setWorld(this.world);
-    this.coinCounterSystem.setWorld(this.world);
-    this.particleSystem.setWorld(this.world);
-    this.speedBoostSystem.setWorld(this.world);
-    this.vignetteSystem.setWorld(this.world);
-
-    // Finally add systems to the world
-    this.world.addSystem(this.gridRenderSystem);
-    this.world.addSystem(this.movementSystem);
-    this.world.addSystem(this.inputSystem);
-    this.world.addSystem(this.treeSystem);
-    this.world.addSystem(this.zIndexSystem);
-    this.world.addSystem(this.coinSystem);
-    this.world.addSystem(this.uiRenderSystem);
-    this.world.addSystem(this.coinCounterSystem);
-    this.world.addSystem(this.particleSystem);
-    this.world.addSystem(this.speedBoostSystem);
-    this.world.addSystem(this.vignetteSystem);
-
-    // Reinitialize all systems
-    this.movementSystem.reinitialize();
-    this.inputSystem.reinitialize();
-    this.gridRenderSystem.reinitialize();
-    this.treeSystem.reinitialize();
-    this.zIndexSystem.reinitialize();
-    this.coinSystem.reinitialize();
-    this.uiRenderSystem.reinitialize();
-    this.coinCounterSystem.reinitialize();
-    this.particleSystem.reinitialize();
-    this.speedBoostSystem.reinitialize();
-    this.vignetteSystem.reinitialize();
-
-    // Set up event listeners
-    this.world.on('gameOver', () => {
-      setTimeout(() => {
-        this.restart();
-      }, 1000);
-    });
-
-    // Create initial entities
-    this.createCharacter();
-    this.createCoinCounter();
-
-    // Start the game
-    this.world.setGameState(GameState.Starting);
+    // Get UI container and add to stage
+    const uiContainer = this.world.getUIContainer();
+    if (uiContainer) {
+      this.app.stage.addChild(uiContainer.container);
+      uiContainer.container.position.set(0, 0);
+    }
   }
 
-  public async start(): Promise<void> {
-    // Clean up any existing app instance
-    if (this.app) {
-      this.app.destroy(true);
-    }
-
-    // Calculate target resolution (720p)
-    const targetWidth = 1280;
-    const targetHeight = 720;
-
-    // Calculate scale to fit the window while maintaining aspect ratio
-    const scale = Math.min(
-      window.innerWidth / targetWidth,
-      window.innerHeight / targetHeight
-    );
-
-    // Calculate actual dimensions
-    const width = Math.floor(targetWidth * scale);
-    const height = Math.floor(targetHeight * scale);
-
+  public async initialize(): Promise<void> {
+    console.log('[Game] Initializing game...');
+    // Initialize PIXI Application
     this.app = new Application();
     await this.app.init({
-      width,
-      height,
-      backgroundColor: 0xffffff, // Sky blue background
-      resolution: Math.min(window.devicePixelRatio || 1, 2), // Cap resolution at 2x
-      autoDensity: true, // Enable auto density for crisp rendering
-      resizeTo: window, // Make canvas resize to window
+        width: window.innerWidth,
+        height: window.innerHeight,
+        backgroundColor: 0xffffff,
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
     });
-
-    // Remove any existing canvas
-    const existingCanvas = document.querySelector('canvas');
-    if (existingCanvas) {
-      existingCanvas.remove();
-    }
 
     document.body.appendChild(this.app.canvas);
 
-    // Load assets first
-    await Assets.load([
-      'character.png',
-      'tree.png',
-      'coin.png',
-      'vignette.png',
-      'vignette2.png',
-      'vignette3.png'
-    ]);
+    // Load all required assets first
+    console.log('[Game] Loading assets...');
+    try {
+        const assets = [
+            '/character.png',
+            '/tree.png',
+            '/coin.png',
+            '/vignette3.png'
+        ];
+        console.log('[Game] Loading assets:', assets);
+        await Assets.load(assets);
+        
+        
+        console.log('[Game] Assets loaded successfully');
+    } catch (error) {
+        console.error('[Game] Failed to load assets:', error);
+        throw error;
+    }
+
+    // Setup stage with WorldContainerComponent
+    this.setupStage();
+
+    console.log('[Game] Setting up systems...');
+    // Set up systems with PIXI app
+    this.movementSystem.setApp(this.app);
+    this.inputSystem.setApp(this.app);
+    this.gridRenderSystem.setApp(this.app);
+    this.zIndexSystem.setApp(this.app);
+    this.coinCounterSystem.setApp(this.app);
+    this.particleSystem.setApp(this.app);
+    // this.debugOverlaySystem.setApp(this.app);
+    this.gridOccupancySystem.setApp(this.app);
+    this.collisionSystem.setApp(this.app);
+    this.coinCollisionSystem.setApp(this.app);
+    this.treeCollisionSystem.setApp(this.app);
+    this.gridObjectSpawnerSystem.setApp(this.app);
+    this.objectRecyclingSystem.setApp(this.app);
+    this.vignetteUISystem.setApp(this.app);
+
+    console.log('[Game] Adding systems to world...');
+    // Add systems to world in correct order
+    this.world.addSystem(this.movementSystem);
+    this.world.addSystem(this.inputSystem);
+    this.world.addSystem(this.gridRenderSystem);
+    this.world.addSystem(this.zIndexSystem);
+    this.world.addSystem(this.coinCounterSystem);
+    this.world.addSystem(this.particleSystem);
+    // this.world.addSystem(this.debugOverlaySystem);
+    this.world.addSystem(this.gridOccupancySystem);
+    this.world.addSystem(this.collisionSystem);
+    this.world.addSystem(this.coinCollisionSystem);
+    this.world.addSystem(this.treeCollisionSystem);
+    this.world.addSystem(this.gridObjectSpawnerSystem);
+    this.world.addSystem(this.objectRecyclingSystem);
+    this.world.addSystem(this.vignetteUISystem);
+
+    console.log('[Game] Creating game entities...');
+    // Create game-specific entities
+    await this.createCharacter();
+    this.createCoinCounter();
+    this.createVignette();
+
+    // Set initial game state
+    const gameState = this.world.getGameState();
+    if (gameState) {
+        console.log('[Game] Setting initial game state to Starting');
+        gameState.currentState = GameState.Starting;
+    }
     
-    // Reset stage position to center
-    this.app.stage.position.set(
-      this.app.screen.width / 2,
-      this.app.screen.height / 2
-    );
+    console.log('[Game] Initialization complete');
+  }
 
-    // Initialize systems and start the game
-    await this.initializeSystems();
-
-    // Start the game loop
+  public start(): void {
+    if (this.isRunning) return;
+    console.log('[Game] Starting game loop');
+    this.isRunning = true;
+    this.lastTime = performance.now();
     this.app.ticker.add(this.gameLoop);
+
+    // Set game state to Playing through the GameStateComponent
+    const gameState = this.world.getGameState();
+    if (gameState) {
+      console.log('[Game] Setting game state to Playing');
+      gameState.currentState = GameState.Playing;
+    } else {
+      console.error('[Game] Failed to get game state component');
+    }
 
     // Add window resize handler
     window.addEventListener('resize', () => {
-      const newScale = Math.min(
-        window.innerWidth / targetWidth,
-        window.innerHeight / targetHeight
-      );
-      const newWidth = Math.floor(targetWidth * newScale);
-      const newHeight = Math.floor(targetHeight * newScale);
+      console.log('[Game] Handling window resize');
+      // Update renderer size
+      this.app.renderer.resize(window.innerWidth, window.innerHeight);
       
-      this.app.renderer.resize(newWidth, newHeight);
-      this.app.stage.position.set(
-        this.app.screen.width / 2,
-        this.app.screen.height / 2
-      );
+      // Re-center the stage and update world container
+      this.setupStage();
     });
   }
 
   private async createCharacter(): Promise<void> {
+    console.log('[Game] Creating character entity');
     // Remove old character if it exists
     if (this.character) {
+      console.log('[Game] Removing old character entity');
       const visual = this.character.getComponent<VisualComponent>(VisualComponentType);
       if (visual && visual.container.parent) {
         visual.container.parent.removeChild(visual.container);
@@ -257,18 +227,28 @@ export class Game {
     
     // Calculate initial world position from grid position (0,0)
     const initialGridPos = { x: 0, y: 0 };
-    const worldPos = this.gridToWorld(initialGridPos.x, initialGridPos.y);
+    const worldPos = this.gridService.gridToWorld(initialGridPos.x, initialGridPos.y);
+
     const gridPos = new GridPositionComponent(initialGridPos.x, initialGridPos.y);
 
     // Set transform to the world position
     const transform = new TransformComponent(worldPos.x, worldPos.y);
-    const visual = new VisualComponent({ spritePath: 'character.png' });
+    const visual = new VisualComponent({ spritePath: '/character.png' });
     const movement = new IsometricMovementComponent(150);
-    movement.targetDirection = Direction.DownRight; // Start moving down-right
-    const zIndex = new ZIndexComponent(Z_INDEX.CHARACTER);
+    
+    // Set initial movement direction and target
+    movement.currentDirection = Direction.DownRight;
+    movement.targetDirection = Direction.DownRight;
+    
+    // Set initial grid target position
+    const nextPos = { x: initialGridPos.x + 1, y: initialGridPos.y + 1 };
+    gridPos.setTargetPosition(nextPos.x, nextPos.y);
+
+    const zIndex = new ZIndexComponent();
     const player = new PlayerComponent();
     const particle = new ParticleComponent();
     const speedBoost = new SpeedBoostComponent();
+    const gridOccupancy = new GridOccupancyComponent(OccupancyType.Character);
 
     this.character.addComponent(gridPos);
     this.character.addComponent(transform);
@@ -278,12 +258,13 @@ export class Game {
     this.character.addComponent(player);
     this.character.addComponent(particle);
     this.character.addComponent(speedBoost);
+    this.character.addComponent(gridOccupancy);
     this.world.addEntity(this.character);
 
     // Add the visual to the world container
-    const movementSystem = this.world.getSystem<MovementSystem>(MovementSystem);
-    if (movementSystem && movementSystem.worldContainer) {
-      movementSystem.worldContainer.addChild(visual.container);
+    const worldContainer = this.world.getWorldContainer();
+    if (worldContainer) {
+      worldContainer.container.addChild(visual.container);
     }
     
     // Set the visual position to match the transform
@@ -291,8 +272,10 @@ export class Game {
   }
 
   private createCoinCounter(): void {
+    console.log('[Game] Creating coin counter entity');
     // Remove old counter if it exists
     if (this.coinCounter) {
+      console.log('[Game] Removing old coin counter entity');
       const ui = this.coinCounter.getComponent<UIComponent>(UIComponentType);
       if (ui && ui.container.parent) {
         ui.container.parent.removeChild(ui.container);
@@ -311,7 +294,7 @@ export class Game {
         fill: 0xFFD700, // Gold color
         stroke: {
           color: 0x000000,
-          width: 4
+          width: 2
         }
       }
     });
@@ -324,36 +307,39 @@ export class Game {
     if (this.app) {
       // Since stage is centered at (0,0), we need to position relative to that
       ui.setPosition(0, -this.app.screen.height / 2 + 40);
+      
+      // Add the UI component to the UI container
+      const uiContainer = this.world.getUIContainer();
+      if (uiContainer) {
+        uiContainer.container.addChild(ui.container);
+      }
     }
   }
 
-  private gridToWorld(gridX: number, gridY: number): { x: number, y: number } {
-    const isoX = (gridX - gridY) * (this.TILE_WIDTH / 2);
-    const isoY = (gridX + gridY) * (this.TILE_HEIGHT / 2);
-    return { x: isoX, y: isoY };
+  private createVignette(): void {
+    console.log('[Game] Creating vignette entity');
+    // Remove old vignette if it exists
+    if (this.vignette) {
+      console.log('[Game] Removing old vignette entity');
+      this.world.removeEntity(this.vignette);
+    }
+
+    // Create new vignette
+    this.vignette = new BaseEntity();
+    const vignetteComponent = new VignetteUIComponent();
+    this.vignette.addComponent(vignetteComponent);
+    this.world.addEntity(this.vignette);
   }
 
   public async restart(): Promise<void> {
     console.log('[Game] Starting game restart');
 
-    // Cleanup current world
-    this.world.cleanup();
+    // Stop the game loop
+    this.stop();
 
-    // Clear the stage
-    while (this.app.stage.children.length > 0) {
-      const child = this.app.stage.children[0];
-      child.destroy();
-      this.app.stage.removeChild(child);
-    }
+    window.location.reload();
+    return;
 
-    // Reset stage position
-    this.app.stage.position.set(
-      this.app.screen.width / 2,
-      this.app.screen.height / 2
-    );
-
-    // Initialize systems and start the game
-    await this.initializeSystems();
   }
 
   private gameLoop(): void {
@@ -361,10 +347,35 @@ export class Game {
     const deltaTime = (currentTime - this.lastTime) / 1000;
     this.lastTime = currentTime;
 
-    this.world.update(deltaTime);
+    const gameState = this.world.getGameState();
+    if (gameState) {
+      const state = gameState.currentState;
+      if (state === GameState.Playing) {
+        this.world.update(deltaTime);
+      }
+    }
   }
 
   public get pixiApp(): Application {
     return this.app;
+  }
+
+  public stop(): void {
+    if (!this.isRunning) return;
+    console.log('[Game] Stopping game loop');
+    this.isRunning = false;
+    this.app.ticker.remove(this.gameLoop);
+  }
+
+  public cleanup(): void {
+    console.log('[Game] Starting cleanup');
+    this.stop();
+    this.world.cleanup();
+    this.app.destroy(true, { children: true });
+    console.log('[Game] Cleanup complete');
+  }
+
+  public resize(width: number, height: number): void {
+    this.app.renderer.resize(width, height);
   }
 } 
