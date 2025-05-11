@@ -247,7 +247,7 @@ export class Game {
 
     const zIndex = new ZIndexComponent();
     const player = new PlayerComponent();
-    const particle = new ParticleComponent();
+    // const particle = new ParticleComponent();
     const speedBoost = new SpeedBoostComponent();
     const gridOccupancy = new GridOccupancyComponent(OccupancyType.Character);
 
@@ -257,7 +257,7 @@ export class Game {
     this.character.addComponent(movement);
     this.character.addComponent(zIndex);
     this.character.addComponent(player);
-    this.character.addComponent(particle);
+    // this.character.addComponent(particle);
     this.character.addComponent(speedBoost);
     this.character.addComponent(gridOccupancy);
     this.world.addEntity(this.character);
