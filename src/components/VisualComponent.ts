@@ -26,7 +26,6 @@ export class VisualComponent implements Component {
 
   private async loadSprite(spritePath: string, YOffset: number): Promise<void> {
     try {
-      console.log('[VisualComponent] Loading sprite:', spritePath);
       await Assets.load(spritePath);
       const texture = Assets.get(spritePath);
       this.sprite = new Sprite(texture);
