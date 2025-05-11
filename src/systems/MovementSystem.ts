@@ -128,10 +128,6 @@ export class MovementSystem extends BaseSystem {
                 Math.abs(currentWorldPos.y - snappedWorldPos.y) < threshold;
 
             if (isOnGridPoint) {
-                // Snap to grid when changing direction for precision
-                transform.x = snappedWorldPos.x;
-                transform.y = snappedWorldPos.y;
-                visual.container.position.set(transform.x, transform.y);
 
                 const nextPos = this.gridService.getNextGridPosition(
                     Math.round(currentGridPos.x),
@@ -176,11 +172,6 @@ export class MovementSystem extends BaseSystem {
 
                 if (this.canMoveToPosition(nextPos.x, nextPos.y)) {
                     gridPos.setTargetPosition(nextPos.x, nextPos.y);
-                    
-                    // Keep our exact position
-                    transform.x = exactCurrentPos.x;
-                    transform.y = exactCurrentPos.y;
-                    visual.container.position.set(transform.x, transform.y);
                 } else {
                     movement.currentDirection = Direction.None;
                 }
