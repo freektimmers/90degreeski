@@ -15,35 +15,39 @@ export class VisualComponent implements Component {
     let YOffset = - 32;
     
     if (options.spritePath) {
-      try {
-        // Add leading slash if not present
-        const assetPath = options.spritePath.startsWith('/') ? options.spritePath : `/${options.spritePath}`;
-        const texture = Assets.get(assetPath);
-        this.sprite = new Sprite(texture);
-        this.sprite.anchor.set(0.5);
-        
-        // Set size to 128x128 (doubled from 64x64)
-        const targetSize = 128;
-        const scale = targetSize / Math.max(this.sprite.width, this.sprite.height);
-        this.sprite.scale.set(scale);
-        
-        // Start facing right (for DownRight movement)
-        this.sprite.scale.x = -Math.abs(this.sprite.scale.x);
-        this.sprite.y += YOffset;
-        
-        this.container.addChild(this.sprite);
-      } catch (error) {
-        console.warn(`[VisualComponent] Failed to load sprite: ${options.spritePath}`, error);
-        // Fallback to a red circle if sprite loading fails
-        this.graphics = new Graphics()
-          .circle(0, 0, 5)
-          .fill({ color: 0xFF0000 });
-        this.container.addChild(this.graphics);
-      }
+      this.loadSprite(options.spritePath, YOffset);
     } else {
       this.graphics = new Graphics()
         .circle(0, 0, options.radius || 5)
         .fill({ color: options.color || 0xFF0000 });
+      this.container.addChild(this.graphics);
+    }
+  }
+
+  private async loadSprite(spritePath: string, YOffset: number): Promise<void> {
+    try {
+      console.log('[VisualComponent] Loading sprite:', spritePath);
+      await Assets.load(spritePath);
+      const texture = Assets.get(spritePath);
+      this.sprite = new Sprite(texture);
+      this.sprite.anchor.set(0.5);
+      
+      // Set size to 128x128 (doubled from 64x64)
+      const targetSize = 128;
+      const scale = targetSize / Math.max(this.sprite.width, this.sprite.height);
+      this.sprite.scale.set(scale);
+      
+      // Start facing right (for DownRight movement)
+      this.sprite.scale.x = -Math.abs(this.sprite.scale.x);
+      this.sprite.y += YOffset;
+      
+      this.container.addChild(this.sprite);
+    } catch (error) {
+      console.warn(`[VisualComponent] Failed to load sprite: ${spritePath}`, error);
+      // Fallback to a red circle if sprite loading fails
+      this.graphics = new Graphics()
+        .circle(0, 0, 5)
+        .fill({ color: 0xFF0000 });
       this.container.addChild(this.graphics);
     }
   }

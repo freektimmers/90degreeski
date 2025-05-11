@@ -1,5 +1,6 @@
 import { Component, Entity } from '../core/Component';
 import { Container, Sprite, Assets } from 'pixi.js';
+import { getAssetPath } from '../utils/assetPath';
 
 export const VignetteUIComponentType = Symbol('VignetteUIComponent');
 
@@ -14,7 +15,8 @@ export class VignetteUIComponent implements Component {
     
     // Load the vignette sprite
     try {
-      const texture = Assets.get('/vignette3.png');
+      const texture = Assets.get(getAssetPath('vignette3.png'));
+      console.log('[VignetteUIComponent] Getting asset:', getAssetPath('vignette3.png'));
       this.sprite = new Sprite(texture);
       
       // Center the sprite's anchor point

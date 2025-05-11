@@ -30,6 +30,7 @@ import { GameState } from '../components/GameStateComponent';
 import { VignetteUISystem } from '../systems/VignetteUISystem';
 import { VignetteUIComponent } from '../components/VignetteUIComponent';
 import { ObjectRecyclingSystem } from '../systems/ObjectRecyclingSystem';
+import { getAssetPath } from '@/utils/assetPath';
 
 @injectable()
 export class Game {
@@ -115,10 +116,10 @@ export class Game {
     console.log('[Game] Loading assets...');
     try {
         const assets = [
-            '/character.png',
-            '/tree.png',
-            '/coin.png',
-            '/vignette3.png'
+          getAssetPath('character.png'),
+          getAssetPath('tree.png'),
+          getAssetPath('coin.png'),
+          getAssetPath('vignette3.png')
         ];
         console.log('[Game] Loading assets:', assets);
         await Assets.load(assets);
@@ -233,7 +234,7 @@ export class Game {
 
     // Set transform to the world position
     const transform = new TransformComponent(worldPos.x, worldPos.y);
-    const visual = new VisualComponent({ spritePath: '/character.png' });
+    const visual = new VisualComponent({ spritePath: 'character.png' });
     const movement = new IsometricMovementComponent(150);
     
     // Set initial movement direction and target
